@@ -14,8 +14,10 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -27,7 +29,8 @@ from .. import store
 from ..config import get_settings
 from ..features import extract_features
 from ..model import load, predict_proba_safe
-from .schemas import HealthResponse, PredictItem, PredictRequest, PredictResponse
+from .schemas import (HealthResponse, ModelInfoResponse, PredictItem, PredictRequest,
+                     PredictResponse)
 
 settings = get_settings()
 
@@ -145,6 +148,40 @@ def healthz():
         "status": "ok" if bundle else "degraded",
         "model_loaded": bundle is not None,
         "model_version": bundle.get("version", "") if bundle else "",
+    }
+
+
+@app.get("/model", response_model=ModelInfoResponse, tags=["运维接口"],
+         summary="模型信息：名称、版本、阈值与测试集指标")
+def model_info():
+    """给前端展示用。指标从模型同目录的 model_info.json 读取，读不到就返回空指标。"""
+    bundle = _state["bundle"]
+    if not bundle:
+        raise HTTPException(status_code=503, detail=_state["error"] or "模型未加载")
+
+    meta: dict = {}
+    try:
+        info_path = Path(str(settings.resolve(settings.model_path))).with_name("model_info.json")
+        if info_path.exists():
+            meta = json.loads(info_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001  ——元信息读失败不影响服务
+        meta = {}
+
+    return {
+        "model_name": bundle.get("model_name", "-"),
+        "model_version": bundle.get("version", "-"),
+        "threshold": float(bundle.get("threshold", settings.threshold)),
+        "feature_dim": len(bundle.get("feature_names", []) or []),
+        "n_total": meta.get("n_total"),
+        "n_train": meta.get("n_train"),
+        "n_test": meta.get("n_test"),
+        "data_file": meta.get("data_file"),
+        "trained_at": meta.get("trained_at"),
+        "split": meta.get("split"),
+        "domain_overlap": meta.get("domain_overlap"),
+        "select_reason": meta.get("select_reason"),
+        "metrics": {k: float(v) for k, v in (meta.get("metrics") or {}).items()},
+        "confusion": meta.get("confusion"),
     }
 
 

@@ -6,7 +6,7 @@ json_schema_extra 里的 example 会显示在 /docs 页面上，点 "Try it out"
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,3 +48,23 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="ok 表示服务可用，degraded 表示模型未加载")
     model_loaded: bool
     model_version: str
+
+
+class ModelInfoResponse(BaseModel):
+    """模型元信息。给前端/看板展示用，缺失的字段返回 None 而不是报错。"""
+
+    model_name: str = Field(..., description="模型名称，如 XGBoost")
+    model_version: str = Field(..., description="训练时生成的版本号")
+    threshold: float = Field(..., description="服务端判定阈值")
+    feature_dim: int = Field(..., description="特征维度")
+    n_total: Optional[int] = Field(None, description="训练样本总数")
+    n_train: Optional[int] = Field(None, description="训练集条数")
+    n_test: Optional[int] = Field(None, description="测试集条数")
+    data_file: Optional[str] = Field(None, description="训练数据文件名")
+    trained_at: Optional[str] = Field(None, description="训练时间")
+    split: Optional[str] = Field(None, description="切分方式：group / random")
+    domain_overlap: Optional[float] = Field(None, description="训练测试域名重叠率")
+    select_reason: Optional[str] = Field(None, description="模型选型理由")
+    metrics: Dict[str, float] = Field(default_factory=dict,
+                                      description="测试集指标：accuracy/precision/recall/f1/auc")
+    confusion: Optional[List[List[int]]] = Field(None, description="混淆矩阵 [[TN,FP],[FN,TP]]")

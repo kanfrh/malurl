@@ -62,6 +62,7 @@ curl -X POST http://127.0.0.1:8000/predict \
 |---|---|---|
 | POST | `/predict` | 批量判定，单次上限由 `MALURL_MAX_BATCH` 控制（默认 500） |
 | GET | `/healthz` | 健康检查，返回模型是否加载成功与版本号 |
+| GET | `/model` | 模型元信息：名称、版本、阈值、特征维度、测试集指标（远程界面用） |
 | GET | `/metrics` | Prometheus 指标：QPS、延迟分位、恶意判定数、概率分布 |
 | GET | `/docs` | 交互式接口文档（Swagger） |
 

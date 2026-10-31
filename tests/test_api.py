@@ -149,3 +149,21 @@ def test_judgement_log_written(client):
     assert log_path.exists()
     content = log_path.read_text(encoding="utf-8").strip()
     assert "log-test.tk" in content
+
+def test_model_info(client):
+    """模型信息接口：远程界面的「模型信息」页签要靠它。"""
+    r = client.get("/model", headers=HEADERS)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model_name"]
+    assert body["model_version"] == "test-1"
+    assert 0.0 < body["threshold"] < 1.0
+    assert body["feature_dim"] > 0
+    assert isinstance(body["metrics"], dict)
+
+
+def test_model_info_matches_health(client):
+    """两个接口报告的版本号必须一致，否则前端展示会自相矛盾。"""
+    h = client.get("/healthz", headers=HEADERS).json()
+    m = client.get("/model", headers=HEADERS).json()
+    assert h["model_version"] == m["model_version"]
