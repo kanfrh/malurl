@@ -167,3 +167,12 @@ def test_model_info_matches_health(client):
     h = client.get("/healthz", headers=HEADERS).json()
     m = client.get("/model", headers=HEADERS).json()
     assert h["model_version"] == m["model_version"]
+
+def test_json_charset(client):
+    """响应必须声明 charset=utf-8。
+
+    否则 PowerShell 5.1 这类客户端会按 Latin-1 解码，中文模型名变成乱码。
+    """
+    r = client.post("/predict", json={"urls": ["http://a.tk/x"]}, headers=HEADERS)
+    assert "charset=utf-8" in r.headers["content-type"].lower()
+    assert r.json()["model_name"]  # 中文名能正常序列化

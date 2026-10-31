@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from prometheus_client import (CONTENT_TYPE_LATEST, Counter, Histogram,
                                generate_latest)
 
@@ -57,11 +57,21 @@ async def lifespan(app: FastAPI):
     _state["bundle"] = None
 
 
+class UTF8JSONResponse(JSONResponse):
+    """显式声明 charset=utf-8。
+
+    Starlette 默认只发 application/json，不带 charset；PowerShell 5.1 这类客户端
+    会退回 Latin-1 解码，中文模型名就变成乱码。加上 charset 即可。
+    """
+
+    media_type = "application/json; charset=utf-8"
+
 app = FastAPI(
     title="恶意 URL 检测服务",
     description="基于 41 维 URL 静态特征与集成学习模型的检测接口。不访问目标站点。",
     version="0.1.0",
     lifespan=lifespan,
+    default_response_class=UTF8JSONResponse,
 )
 
 
