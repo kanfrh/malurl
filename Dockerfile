@@ -6,10 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# pip 源做成构建参数：
+#   默认用官方 PyPI（CI 在境外，速度快）
+#   国内构建时由 docker-compose.yml 覆盖成清华镜像，否则连 files.pythonhosted.org 会超时
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 # 先装依赖，利用 Docker 层缓存
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir . && rm -rf /root/.cache
+RUN pip install --no-cache-dir --retries 5 --timeout 60 -i "${PIP_INDEX_URL}" . \
+    && rm -rf /root/.cache
 
 # 数据与模型：构建时直接训练一个可用的模型，镜像自带，不依赖宿主机
 COPY data ./data

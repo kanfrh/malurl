@@ -1,6 +1,11 @@
 services:
   malurl:
-    build: .
+    build:
+      context: .
+      args:
+        # 国内构建必配：否则 pip 连 files.pythonhosted.org 会超时
+        # CI 里用 docker build . 直接构建，走 Dockerfile 默认的官方源
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
     image: malurl:0.1.0
     container_name: malurl
     ports:
