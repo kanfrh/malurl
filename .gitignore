@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.env
+
+# 模型产物
+artifacts/
+logs/
+tests/_tmp/
+
+# 真实数据集不入库，演示数据保留
+data/raw/
+data/**/*.csv
+data/*.csv
+!data/demo_urls.csv
+
+# 日志
+*.jsonl
+*.log

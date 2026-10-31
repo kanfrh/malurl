@@ -1,0 +1,14 @@
+# 构建时忽略不必要的内容
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+artifacts
+data/*.csv
+!data/demo_urls.csv
+tests
+docs
+*.md
+!README.md
