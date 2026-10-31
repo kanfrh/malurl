@@ -48,6 +48,27 @@ def test_at_sign_trick():
     assert extract_features("http://paypal.com@evil.tk/login")[idx] == 1.0
 
 
+def test_subdomain_count_with_two_level_suffix():
+    """icbc.com.cn 的可注册域有两级后缀，子域层数必须是 0。"""
+    idx = FEATURE_NAMES.index("n_subdomains")
+    assert extract_features("https://icbc.com.cn/login")[idx] == 0.0
+    assert extract_features("https://www.icbc.com.cn/login")[idx] == 1.0
+    assert extract_features("https://ebank.cmbchina.com/login")[idx] == 1.0
+    assert extract_features("https://a.b.example.com/")[idx] == 2.0
+    assert extract_features("http://192.168.1.1/")[idx] == 0.0
+
+
+def test_has_port_does_not_misfire_on_userinfo_or_ipv6():
+    """带用户名密码的 URL 和 IPv6 地址里的冒号不是端口。"""
+    idx = FEATURE_NAMES.index("has_port")
+    assert extract_features("http://a.com:8080/x")[idx] == 1.0
+    assert extract_features("http://a.com/x")[idx] == 0.0
+    assert extract_features("http://user:pass@a.com/x")[idx] == 0.0
+    assert extract_features("http://[::1]/x")[idx] == 0.0
+    assert extract_features("http://[::1]:8080/x")[idx] == 1.0
+    assert extract_features("http://a.com:99999/x")[idx] == 1.0
+
+
 def test_suspicious_tld_and_words():
     tld = FEATURE_NAMES.index("suspicious_tld")
     words = FEATURE_NAMES.index("suspicious_word_cnt")

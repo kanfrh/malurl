@@ -36,6 +36,8 @@ def append(path: Path, records: list, keep_url: bool = True) -> None:
             "risk": r["risk"],
             "model_version": r.get("model_version", ""),
             "source": r.get("source", "api"),
+            # model / whitelist：回流时要能区分"模型判的"和"白名单放行的"
+            "decision": r.get("decision", ""),
         }
         if keep_url:
             item["url"] = r["url"]

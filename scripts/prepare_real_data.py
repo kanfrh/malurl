@@ -35,15 +35,23 @@ HAS_REAL_PATH = re.compile(r"/[^/]")
 
 
 def has_real_path(url: str) -> bool:
+    """URL 是否有真实路径（host/ 这种根路径不算）。
+
+    先去掉查询串和锚点：/?q=1 只有查询参数，不能算"带路径"，
+    否则"有没有路径"仍会作为泄漏特征混进训练集。
+    """
     rest = re.sub(r"^[a-zA-Z]+://", "", str(url))
+    rest = rest.split("#", 1)[0].split("?", 1)[0]
     return bool(HAS_REAL_PATH.search(rest))
 
 
 def build(raw_path: Path, out_path: Path, n_good: int, n_bad: int, seed: int = 42) -> pd.DataFrame:
-    df = pd.read_csv(raw_path, dtype=str).dropna()
+    df = pd.read_csv(raw_path, dtype=str)
     url_col = "url" if "url" in df.columns else df.columns[0]
     label_col = "label" if "label" in df.columns else df.columns[-1]
-    df = df[[url_col, label_col]]
+    # 先只保留需要的两列再 dropna：原始数据集可能有大量用不到的列，
+    # 提前 dropna 会把 url/label 完整但别处缺值的行一起丢掉。
+    df = df[[url_col, label_col]].dropna()
     df.columns = ["url", "label"]
     df["url"] = df["url"].astype(str).str.strip()
 

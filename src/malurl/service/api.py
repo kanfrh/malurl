@@ -15,15 +15,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from prometheus_client import (CONTENT_TYPE_LATEST, Counter, Histogram,
                                generate_latest)
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import store
 from ..config import get_settings
@@ -34,12 +38,15 @@ from .schemas import (HealthResponse, ModelInfoResponse, PredictItem, PredictReq
 
 settings = get_settings()
 
+logger = logging.getLogger("malurl.api")
+
 REQ_TOTAL = Counter("malurl_requests_total", "接口请求数", ["endpoint", "status"])
 REQ_LATENCY = Histogram("malurl_request_seconds", "接口耗时（秒）", ["endpoint"])
 SCORE_HIST = Histogram("malurl_score", "恶意概率分布",
                        buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
 MALICIOUS_TOTAL = Counter("malurl_malicious_total", "判定为恶意的 URL 数量")
 WHITELIST_TOTAL = Counter("malurl_whitelist_total", "命中可信白名单、未走模型的 URL 数量")
+LOG_ERROR_TOTAL = Counter("malurl_log_errors_total", "判定日志写入失败次数")
 
 _state: dict = {"bundle": None, "error": "模型尚未加载"}
 
@@ -73,6 +80,26 @@ app = FastAPI(
     lifespan=lifespan,
     default_response_class=UTF8JSONResponse,
 )
+
+
+# FastAPI 的默认异常处理器直接返回 JSONResponse，不带 charset；
+# default_response_class 只影响正常响应，401/422 的中文 detail 仍会乱码。
+# 这里用同样的 UTF8JSONResponse 接管两类错误响应，保证客户端的编码行为一致。
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return UTF8JSONResponse(
+        {"detail": exc.detail},
+        status_code=exc.status_code,
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return UTF8JSONResponse(
+        {"detail": jsonable_encoder(exc.errors())},
+        status_code=422,
+    )
 
 
 def require_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
@@ -130,7 +157,9 @@ def index(request: Request):
 
   <div class="card">
     <div class="row"><a href="/docs">接口文档（可在线调试）</a><span class="k">/docs</span></div>
-    <div class="row"><a href="/healthz">健康检查</a><span class="k">/healthz</span></div>
+    <div class="row"><a href="/healthz">存活检查</a><span class="k">/healthz</span></div>
+    <div class="row"><a href="/readyz">就绪检查（模型是否加载）</a><span class="k">/readyz</span></div>
+    <div class="row"><a href="/model">模型信息</a><span class="k">/model</span></div>
     <div class="row"><a href="/metrics">运行指标（Prometheus）</a><span class="k">/metrics</span></div>
     <div class="row"><span>批量判定接口</span><span class="k">POST /predict</span></div>
   </div>
@@ -161,6 +190,25 @@ def healthz():
     }
 
 
+@app.get("/readyz", response_model=HealthResponse, tags=["运维接口"],
+         summary="就绪检查：模型加载成功才返回 200，供容器健康检查使用")
+def readyz(response: Response):
+    """就绪探针。
+
+    /healthz 是存活探针（进程活着就 200，模型坏了也能排查问题）；
+    /readyz 是就绪探针，模型没加载时返回 503，让 Docker/K8s 判定不可用。
+    两者分开，避免模型文件损坏时容器被反复重启、日志也看不到。
+    """
+    bundle = _state["bundle"]
+    if bundle is None:
+        response.status_code = 503
+    return {
+        "status": "ok" if bundle else "degraded",
+        "model_loaded": bundle is not None,
+        "model_version": bundle.get("version", "") if bundle else "",
+    }
+
+
 @app.get("/model", response_model=ModelInfoResponse, tags=["运维接口"],
          summary="模型信息：名称、版本、阈值与测试集指标")
 def model_info():
@@ -182,6 +230,7 @@ def model_info():
         "model_version": bundle.get("version", "-"),
         "threshold": float(bundle.get("threshold", settings.threshold)),
         "feature_dim": len(bundle.get("feature_names", []) or []),
+        "max_batch": settings.max_batch,
         "n_total": meta.get("n_total"),
         "n_train": meta.get("n_train"),
         "n_test": meta.get("n_test"),
@@ -255,12 +304,19 @@ def predict(req: PredictRequest):
     n_mal = sum(1 for r in results if r.label == "malicious")
     MALICIOUS_TOTAL.inc(n_mal)
 
-    # 落盘判定日志，供样本回流与漂移分析
-    store.append(settings.resolve(settings.log_path),
-                 [{"url": r.url, "score": r.score, "label": r.label,
-                   "risk": r.risk, "model_version": version, "source": req.source}
-                  for r in results],
-                 keep_url=settings.log_urls)
+    # 落盘判定日志，供样本回流与漂移分析。
+    # 日志写失败（磁盘满、目录只读、挂载权限不对）不能让已经完成的推理变成 500：
+    # 记 warning + 指标，响应照常返回。
+    try:
+        store.append(settings.resolve(settings.log_path),
+                     [{"url": r.url, "score": r.score, "label": r.label,
+                       "risk": r.risk, "model_version": version,
+                       "source": req.source, "decision": r.source}
+                      for r in results],
+                     keep_url=settings.log_urls)
+    except (OSError, UnicodeError) as e:
+        LOG_ERROR_TOTAL.inc()
+        logger.warning("判定日志写入失败：%s", e)
 
     REQ_TOTAL.labels("predict", "200").inc()
     REQ_LATENCY.labels("predict").observe(elapsed_ms / 1000.0)

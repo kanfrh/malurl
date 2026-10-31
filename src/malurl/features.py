@@ -191,6 +191,26 @@ def extract_features(url: str) -> list:
 
     brand_in_sub = has_brand_outside_sld(host, sld)
 
+    # 子域层数 = 主机标签数 - 可注册域标签数。
+    # 不能直接用 host.count(".") - 1：icbc.com.cn 的可注册域本身有两级后缀，
+    # 老算法会把"0 层子域"算成 1 层、把 www.icbc.com.cn 算成 2 层。
+    if has_ip or not sld:
+        n_subdomains = 0
+    else:
+        n_subdomains = max(
+            len(host.rstrip(".").split(".")) - len(sld.split(".")), 0)
+
+    # 是否带端口：用 urlparse 的 .port 判断。
+    # 老写法 ":" in netloc 会把 user:pass@host 的冒号、
+    # 以及 IPv6 的 [::1] 误判成"带端口"。
+    try:
+        has_port = 1.0 if parsed.port is not None else 0.0
+    except ValueError:
+        # 端口越界（如 :99999）或写成 :abc 时 .port 会抛 ValueError，
+        # 但这类 netloc 确实带了端口分隔符。
+        authority = netloc.rsplit("@", 1)[-1]
+        has_port = 1.0 if ":" in authority.rsplit("]", 1)[-1] else 0.0
+
     lower_raw = raw.lower()
     n_digits = sum(ch.isdigit() for ch in raw)
 
@@ -223,13 +243,13 @@ def extract_features(url: str) -> list:
         float(host.count("-")),
         float(sum(ch.isdigit() for ch in path)),
         # ---- 主机（8）----
-        0.0 if has_ip else float(max(host.count(".") - 1, 0)),
+        float(n_subdomains),
         float(has_ip),
         1.0 if "@" in raw else 0.0,
         1.0 if full.lower().startswith("https://") else 0.0,
         1.0 if host in SHORTENERS else 0.0,
         1.0 if tld in SUSPICIOUS_TLDS else 0.0,
-        1.0 if ":" in netloc else 0.0,
+        has_port,
         float(brand_in_sub),
         # ---- 结构（8）----
         float(len(segs)),

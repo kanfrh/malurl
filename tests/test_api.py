@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -63,6 +64,23 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["model_loaded"] is True
     assert body["model_version"] == "test-1"
+
+
+def test_readyz_reflects_model_state(client, monkeypatch):
+    """/healthz 保持存活语义；/readyz 在模型不可用时必须 503。"""
+    r = client.get("/readyz")
+    assert r.status_code == 200
+    assert r.json()["model_loaded"] is True
+
+    from malurl.service import api as api_module
+    monkeypatch.setitem(api_module._state, "bundle", None)
+
+    r = client.get("/readyz")
+    assert r.status_code == 503
+    assert r.json()["status"] == "degraded"
+
+    # 存活探针仍然返回 200，便于进入容器排查问题
+    assert client.get("/healthz").status_code == 200
 
 
 def test_predict_single(client):
@@ -146,9 +164,27 @@ def test_judgement_log_written(client):
     if log_path.exists():
         log_path.unlink()
     client.post("/predict", json={"urls": ["http://log-test.tk/login"]}, headers=HEADERS)
+    client.post("/predict", json={"urls": ["https://www.icbc.com.cn/login"]}, headers=HEADERS)
     assert log_path.exists()
     content = log_path.read_text(encoding="utf-8").strip()
+    rows = [json.loads(line) for line in content.splitlines()]
     assert "log-test.tk" in content
+    assert rows[0]["decision"] == "model"
+    assert rows[-1]["decision"] == "whitelist"
+
+
+def test_predict_survives_log_failure(client, monkeypatch):
+    """日志目录不可写时，推理结果必须照常返回，不能 500。"""
+    from malurl.service import api as api_module
+
+    def boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(api_module.store, "append", boom)
+    r = client.post("/predict", json={"urls": ["http://log-fail.tk/login"]}, headers=HEADERS)
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+    assert "malurl_log_errors_total" in client.get("/metrics").text
 
 def test_model_info(client):
     """模型信息接口：远程界面的「模型信息」页签要靠它。"""
@@ -159,6 +195,7 @@ def test_model_info(client):
     assert body["model_version"] == "test-1"
     assert 0.0 < body["threshold"] < 1.0
     assert body["feature_dim"] > 0
+    assert body["max_batch"] == 3  # 环境变量 MALURL_MAX_BATCH=3
     assert isinstance(body["metrics"], dict)
 
 
@@ -176,3 +213,19 @@ def test_json_charset(client):
     r = client.post("/predict", json={"urls": ["http://a.tk/x"]}, headers=HEADERS)
     assert "charset=utf-8" in r.headers["content-type"].lower()
     assert r.json()["model_name"]  # 中文名能正常序列化
+
+
+def test_error_json_charset(client):
+    """错误响应同样要带 charset：401/422 的 detail 里也有中文。"""
+    r = client.post("/predict", json={"urls": ["http://a.tk/"]})  # 不带 API Key
+    assert r.status_code == 401
+    assert "charset=utf-8" in r.headers["content-type"].lower()
+
+    r = client.post("/predict", json={"urls": []}, headers=HEADERS)
+    assert r.status_code == 422
+    assert "charset=utf-8" in r.headers["content-type"].lower()
+
+    r = client.post("/predict", json={"urls": ["http://a.tk/"] * 4}, headers=HEADERS)
+    assert r.status_code == 422
+    assert "charset=utf-8" in r.headers["content-type"].lower()
+    assert "单次最多" in r.json()["detail"]

@@ -57,6 +57,7 @@ class ModelInfoResponse(BaseModel):
     model_version: str = Field(..., description="训练时生成的版本号")
     threshold: float = Field(..., description="服务端判定阈值")
     feature_dim: int = Field(..., description="特征维度")
+    max_batch: int = Field(..., description="单次请求允许的 URL 上限（远程界面按它分批）")
     n_total: Optional[int] = Field(None, description="训练样本总数")
     n_train: Optional[int] = Field(None, description="训练集条数")
     n_test: Optional[int] = Field(None, description="测试集条数")

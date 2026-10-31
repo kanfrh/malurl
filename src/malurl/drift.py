@@ -21,6 +21,14 @@ def compute_psi(reference: dict, X: np.ndarray) -> list:
         if len(e) < 2:
             out.append(0.0)
             continue
+        # 分箱边界是训练集的 min~max。线上样本可能落在范围之外，
+        # np.histogram 对范围外的值直接丢弃，会让"全都跑出训练范围"的严重
+        # 漂移被算成稳定。把首尾边界扩成无穷，让这些值落进首/尾箱。
+        e = e.copy()
+        if np.isfinite(e[0]):
+            e[0] = -np.inf
+        if np.isfinite(e[-1]):
+            e[-1] = np.inf
         counts, _ = np.histogram(X[:, j], bins=e)
         cur = (counts + 1e-6) / (counts.sum() + 1e-6 * len(counts))
         ref = np.asarray(ref_pct, dtype=float)

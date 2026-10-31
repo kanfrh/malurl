@@ -21,7 +21,7 @@ services:
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"]
+      test: ["CMD", "python", "-c", "import http.client,sys; c=http.client.HTTPConnection('127.0.0.1',8000,timeout=3); c.request('GET','/readyz'); sys.exit(0 if c.getresponse().status == 200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
