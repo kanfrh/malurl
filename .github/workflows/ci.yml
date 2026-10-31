@@ -9,11 +9,11 @@ on:
 jobs:
   test:
     name: 单元测试与依赖审计
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -34,9 +34,9 @@ jobs:
 
   docker:
     name: 镜像构建验证
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 构建镜像
         run: docker build -t malurl:ci .
